@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { currentTenantId } from "../../utils/tenantContext.js";
+import { currentTenantId, withoutTenantScope } from "../../utils/tenantContext.js";
 import { AppError } from "../../utils/AppError.js";
 
 /**
@@ -83,7 +83,13 @@ async function assertIdsInOrganization(db, org, ref, path, raw) {
   if (!Target || !Target.schema.path("organizationId")) return; // e.g. Organization itself
 
   const valid = ids.every((id) => mongoose.isValidObjectId(id));
-  const found = valid ? await Target.countDocuments({ _id: { $in: ids }, organizationId: org }) : 0;
+  // `createdBy` / `uploadedBy` / … point at User. A Platform Admin working
+  // inside an organization has no organization of its own (organizationId null),
+  // so for User references that is accepted alongside the organization's users.
+  const scope = ref === "User" ? { $or: [{ organizationId: org }, { organizationId: null }] } : { organizationId: org };
+  const count = () => Target.countDocuments({ _id: { $in: ids }, ...scope }).exec();
+  // The request's own tenant pin would otherwise re-add `organizationId = org` and hide the Platform Admin.
+  const found = valid ? await (ref === "User" ? withoutTenantScope(count) : count()) : 0;
   if (found !== ids.length) {
     throw AppError.badRequest(`Unknown ${humanize(ref)} for this organization`, {
       code: "CROSS_TENANT_REFERENCE",

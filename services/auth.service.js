@@ -12,6 +12,7 @@ import {
   durationToMs,
 } from "../utils/jwt.js";
 import { env } from "../config/env.js";
+import { PLATFORM_ROLE } from "../utils/permissions.js";
 import { buildAuthContext, invalidateUserState, sessionFromContext } from "./authState.service.js";
 
 const REFRESH_MS = durationToMs(env.refreshTokenTtl);
@@ -161,16 +162,75 @@ export async function refresh(refreshToken, ctx = {}) {
   await assertOrganizationOpen(user);
 
   const claims = claimsFor(user);
-  const accessToken = signAccessToken(claims);
   const newRefresh = signRefreshToken(claims);
+
+  // A Platform Admin who had entered an organization stays in it across token
+  // refreshes / page reloads — unless it has since been deactivated or removed.
+  let accessClaims = claims;
+  if (session.actOrganizationId && user.role === PLATFORM_ROLE) {
+    const entered = await Organization.findById(session.actOrganizationId).select("status");
+    if (entered?.status === "active") accessClaims = { ...claims, act: String(entered._id) };
+    else session.actOrganizationId = undefined;
+  }
+  const accessToken = signAccessToken(accessClaims);
   session.tokenHash = hashToken(newRefresh);
   session.lastUsedAt = new Date();
   if (ctx.userAgent) session.userAgent = ctx.userAgent;
   if (ctx.ip) session.ip = ctx.ip;
   await user.save();
 
-  const auth = await buildAuthContext(claims);
+  const auth = await buildAuthContext(accessClaims);
   return { accessToken, refreshToken: newRefresh, session: sessionFromContext(auth) };
+}
+
+/* ---------------------- Platform Admin: enter / leave an organization ---------------------- */
+
+async function platformSession(userId, refreshToken) {
+  const user = await User.findById(userId).select("+sessions");
+  if (!user || user.role !== PLATFORM_ROLE) {
+    throw AppError.forbidden("Only the Platform Admin can enter an organization");
+  }
+  const hash = refreshToken ? hashToken(refreshToken) : null;
+  const session = (user.sessions || []).find((s) => s.tokenHash === hash && s.expiresAt > new Date());
+  if (!session) throw AppError.unauthorized("Session no longer valid, please sign in again");
+  return { user, session };
+}
+
+/** Every organization, for the Platform Admin's switcher (names only — no HR data). */
+export async function listSwitchableOrganizations() {
+  return Organization.find().sort({ name: 1 }).select("name code status logoUrl brandColor");
+}
+
+/**
+ * Enter an organization (or switch to another one) without signing out. The
+ * choice is stored on the refresh session so it survives refresh and reload,
+ * and the returned access token carries it. Platform Admin only; the target
+ * must be an active organization.
+ */
+export async function enterOrganization(userId, refreshToken, organizationId) {
+  const { user, session } = await platformSession(userId, refreshToken);
+  const org = await Organization.findById(organizationId).select("status name");
+  if (!org) throw AppError.notFound("Organization not found");
+  if (org.status !== "active") {
+    throw AppError.badRequest(`${org.name} is inactive — reactivate it from the platform console first`);
+  }
+  session.actOrganizationId = org._id;
+  await user.save();
+  const claims = { ...claimsFor(user), act: String(org._id) };
+  const accessToken = signAccessToken(claims);
+  const auth = await buildAuthContext(claims);
+  return { accessToken, session: sessionFromContext(auth) };
+}
+
+/** Leave the entered organization and go back to the platform console. */
+export async function exitOrganization(userId, refreshToken) {
+  const { user, session } = await platformSession(userId, refreshToken);
+  session.actOrganizationId = undefined;
+  await user.save();
+  const claims = claimsFor(user);
+  const accessToken = signAccessToken(claims);
+  const auth = await buildAuthContext(claims);
+  return { accessToken, session: sessionFromContext(auth) };
 }
 
 /** Revoke the session tied to this refresh token. */
@@ -303,6 +363,9 @@ export async function revokeSession(userId, sessionId) {
 export default {
   login,
   refresh,
+  listSwitchableOrganizations,
+  enterOrganization,
+  exitOrganization,
   logout,
   changePassword,
   revokeAllSessions,

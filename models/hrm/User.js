@@ -26,6 +26,10 @@ const sessionSchema = new Schema(
     createdAt: { type: Date, default: Date.now },
     lastUsedAt: { type: Date, default: Date.now },
     expiresAt: { type: Date, required: true },
+    // Platform Admin only: the organization this session is currently
+    // "entered" into (survives token refresh / page reload). Never set for
+    // organization users.
+    actOrganizationId: { type: Schema.Types.ObjectId },
   },
   { _id: true },
 );

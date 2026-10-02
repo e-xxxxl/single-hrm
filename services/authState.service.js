@@ -1,7 +1,7 @@
 import { User } from "../models/hrm/User.js";
 import { Organization } from "../models/hrm/Organization.js";
 import { AppError } from "../utils/AppError.js";
-import { resolvePermissions, PLATFORM_ROLE } from "../utils/permissions.js";
+import { resolvePermissions, PLATFORM_ROLE, ORG_ADMIN_ROLE } from "../utils/permissions.js";
 import { env } from "../config/env.js";
 
 /**
@@ -70,6 +70,8 @@ export function sessionFromContext(ctx) {
     organizationStrategy: ctx.organizationStrategy,
     employeeId: ctx.employeeId,
     mustChangePassword: ctx.mustChangePassword,
+    isPlatformUser: ctx.isPlatformUser,
+    actingAs: ctx.actingAs,
     permissions: ctx.permissions,
   };
 }
@@ -94,13 +96,27 @@ export async function buildAuthContext(claims) {
     throw AppError.unauthorized("Session no longer valid, please sign in again", { code: "SESSION_REVOKED" });
   }
 
+  // Platform Admin "entered" mode: the token may carry `act` (an organization
+  // id, put there only by POST /auth/enter-org). It is honoured for the
+  // Platform Admin role only; the context then is that one organization with
+  // Org Admin access. The account itself still has no organization.
+  const isPlatformUser = user.role === PLATFORM_ROLE;
+  const actingAs = Boolean(claims.act);
+  if (actingAs && !isPlatformUser) {
+    throw AppError.unauthorized("Session no longer valid, please sign in again", { code: "SESSION_REVOKED" });
+  }
+
   let org = null;
-  if (user.organizationId) {
-    org = await loadOrg(user.organizationId);
+  const orgId = actingAs ? claims.act : user.organizationId;
+  if (orgId) {
+    org = await loadOrg(orgId);
     if (!org || org.status !== "active") {
-      throw AppError.forbidden("Your organization's access to the platform is currently suspended.", {
-        code: "ORG_INACTIVE",
-      });
+      throw AppError.forbidden(
+        actingAs
+          ? "That organization is not active. Switch to another organization or back to the platform console."
+          : "Your organization's access to the platform is currently suspended.",
+        { code: actingAs ? "ACT_ORG_INACTIVE" : "ORG_INACTIVE" },
+      );
     }
   }
 
@@ -108,20 +124,21 @@ export async function buildAuthContext(claims) {
     userId: String(user._id),
     name: user.name,
     email: user.email,
-    role: user.role,
-    scope: user.role === PLATFORM_ROLE ? "platform" : "organization",
+    role: actingAs ? ORG_ADMIN_ROLE : user.role,
+    scope: isPlatformUser && !actingAs ? "platform" : "organization",
+    isPlatformUser,
+    actingAs,
     organizationId: org ? String(org._id) : null,
     organizationName: org?.name ?? null,
     organizationCode: org?.code ?? null,
     organizationLogoUrl: org?.logoUrl ?? null,
     organizationBrandColor: org?.brandColor ?? "blue",
     organizationStrategy: org?.payrollStrategy ?? null,
-    employeeId: user.employee ? String(user.employee) : null,
+    employeeId: !actingAs && user.employee ? String(user.employee) : null,
     mustChangePassword: user.mustChangePassword === true,
-    permissions: resolvePermissions(user.role, {
-      grant: user.permissionsGrant,
-      revoke: user.permissionsRevoke,
-    }),
+    permissions: actingAs
+      ? resolvePermissions(ORG_ADMIN_ROLE)
+      : resolvePermissions(user.role, { grant: user.permissionsGrant, revoke: user.permissionsRevoke }),
   };
 }
 

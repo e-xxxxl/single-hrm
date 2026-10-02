@@ -22,7 +22,13 @@ const departmentSchema = new Schema(
 );
 
 departmentSchema.index({ organizationId: 1, name: 1 }, { unique: true });
-departmentSchema.index({ organizationId: 1, code: 1 }, { unique: true, sparse: true });
+// Unique per organization, but only among departments that actually have a code
+// (a plain `sparse` index still treats "no code" as a value once organizationId
+// is part of the key, so a second code-less department would collide).
+departmentSchema.index(
+  { organizationId: 1, code: 1 },
+  { unique: true, partialFilterExpression: { code: { $type: "string", $gt: "" } } },
+);
 
 departmentSchema.set("toJSON", {
   virtuals: true,

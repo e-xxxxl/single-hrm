@@ -5,6 +5,8 @@ import { Organization } from "../models/hrm/Organization.js";
 import { catchAsync } from "../utils/catchAsync.js";
 import { AppError } from "../utils/AppError.js";
 import { setRefreshCookie, clearRefreshCookie, readRefreshCookie } from "../utils/cookies.js";
+import { recordAudit } from "../services/audit.service.js";
+import { PLATFORM_ROLE } from "../utils/permissions.js";
 
 function requestContext(req) {
   return {
@@ -33,6 +35,44 @@ export const refresh = catchAsync(async (req, res) => {
   const token = readRefreshCookie(req);
   const { accessToken, refreshToken, session } = await authService.refresh(token, requestContext(req));
   setRefreshCookie(res, refreshToken);
+  res.json({ data: { accessToken, session } });
+});
+
+function requirePlatformUser(req) {
+  if (!req.auth.isPlatformUser) throw AppError.forbidden("Only the Platform Admin can switch organizations");
+}
+
+/** GET /api/auth/organizations — the Platform Admin's switcher list. */
+export const switchableOrganizations = catchAsync(async (req, res) => {
+  requirePlatformUser(req);
+  res.json({ data: await authService.listSwitchableOrganizations() });
+});
+
+/** POST /api/auth/enter-org — enter (or switch to) an organization without signing out. */
+export const enterOrganization = catchAsync(async (req, res) => {
+  requirePlatformUser(req);
+  const { accessToken, session } = await authService.enterOrganization(
+    req.auth.userId,
+    readRefreshCookie(req),
+    req.body.organizationId,
+  );
+  await recordAudit(req, {
+    organizationId: session.organizationId,
+    scope: "platform",
+    action: "platform.enter_organization",
+    entityType: "Organization",
+    entityId: session.organizationId,
+    entityLabel: session.organizationName,
+    summary: `Platform Admin entered ${session.organizationName}`,
+    actorRole: PLATFORM_ROLE,
+  });
+  res.json({ data: { accessToken, session } });
+});
+
+/** POST /api/auth/exit-org — leave the entered organization, back to the platform console. */
+export const exitOrganization = catchAsync(async (req, res) => {
+  requirePlatformUser(req);
+  const { accessToken, session } = await authService.exitOrganization(req.auth.userId, readRefreshCookie(req));
   res.json({ data: { accessToken, session } });
 });
 
@@ -108,6 +148,9 @@ export const revokeAllSessions = catchAsync(async (req, res) => {
 export default {
   login,
   refresh,
+  switchableOrganizations,
+  enterOrganization,
+  exitOrganization,
   logout,
   me,
   changePassword,

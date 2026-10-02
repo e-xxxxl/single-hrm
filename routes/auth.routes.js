@@ -34,6 +34,11 @@ router.post("/refresh", refreshLimiter, ctrl.refresh);
 router.post("/logout", ctrl.logout);
 
 router.get("/me", verifyToken, ctrl.me);
+
+/* Platform Admin: enter / switch / leave an organization without signing out */
+router.get("/organizations", verifyToken, ctrl.switchableOrganizations);
+router.post("/enter-org", verifyToken, validate(z.object({ organizationId: z.string().regex(/^[a-f\d]{24}$/i) })), ctrl.enterOrganization);
+router.post("/exit-org", verifyToken, ctrl.exitOrganization);
 router.post("/change-password", verifyToken, credentialLimiter, validate(changePasswordSchema), ctrl.changePassword);
 
 /* Two-factor authentication (TOTP) */

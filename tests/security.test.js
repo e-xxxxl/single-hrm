@@ -489,6 +489,68 @@ describe("platform administration", () => {
     assert.equal((await post("/auth/login", null, { email: "admin2@umbrella.test", password: "whatever-123" })).status, 401);
   });
 
+  test("a Platform Admin can enter, switch between and leave organizations without signing out", async () => {
+    const s = await login("platform@hrm.local");
+    const cookieOf = (res) => (res.headers.get("set-cookie") || "").split(";")[0];
+
+    // Not entered yet: no HR access.
+    assert.equal((await get("/hrm/employees", s.token)).status, 403);
+
+    // Enter A.
+    const toA = await post("/auth/enter-org", s.token, { organizationId: A.orgId }, { headers: { cookie: s.cookie } });
+    assert.equal(toA.status, 200, JSON.stringify(toA.body));
+    assert.equal(toA.body.data.session.actingAs, true);
+    assert.equal(toA.body.data.session.organizationId, A.orgId);
+    const tokA = toA.body.data.accessToken;
+    const aList = await get("/hrm/employees?limit=100", tokA);
+    assert.deepEqual(new Set(ids(aList.body.data)), new Set(ids(A.employees)));
+    // Entered into A, B's records are still invisible.
+    assert.equal((await get(`/hrm/employees/${B.employees[0].id}`, tokA)).status, 404);
+    // Platform routes are closed while inside an organization.
+    assert.equal((await get("/platform/organizations", tokA)).status, 403);
+
+    // Work inside A (a record with `createdBy` = the platform user must save fine).
+    const dept = await post("/hrm/departments", tokA, { name: "Entered Dept" });
+    assert.equal(dept.status, 201, JSON.stringify(dept.body));
+
+    // Switch to B without signing out.
+    const toB = await post("/auth/enter-org", tokA, { organizationId: B.orgId }, { headers: { cookie: s.cookie } });
+    assert.equal(toB.status, 200);
+    const tokB = toB.body.data.accessToken;
+    const bList = await get("/hrm/employees?limit=100", tokB);
+    assert.deepEqual(new Set(ids(bList.body.data)), new Set(ids(B.employees)));
+    assert.equal((await get(`/hrm/employees/${A.employees[0].id}`, tokB)).status, 404);
+
+    // The entered organization survives a token refresh (page reload).
+    const refreshed = await call("POST", "/auth/refresh", { headers: { cookie: s.cookie } });
+    assert.equal(refreshed.status, 200);
+    assert.equal(refreshed.body.data.session.organizationId, B.orgId);
+    assert.equal(refreshed.body.data.session.actingAs, true);
+    const cookie2 = cookieOf(refreshed);
+
+    // A's audit trail records who really acted.
+    const audit = (await get("/audit?limit=100", A.admin.token)).body.data;
+    assert.ok(audit.some((e) => e.action === "department.create" && e.actorRole === "Platform Admin"));
+    assert.ok(audit.some((e) => e.action === "platform.enter_organization"));
+
+    // Leave: back to the console, HR closed again.
+    const out = await post("/auth/exit-org", refreshed.body.data.accessToken, {}, { headers: { cookie: cookie2 } });
+    assert.equal(out.status, 200);
+    assert.equal(out.body.data.session.actingAs, false);
+    assert.equal(out.body.data.session.scope, "platform");
+    assert.equal((await get("/platform/organizations", out.body.data.accessToken)).status, 200);
+    assert.equal((await get("/hrm/employees", out.body.data.accessToken)).status, 403);
+    const afterRefresh = await call("POST", "/auth/refresh", { headers: { cookie: cookie2 } });
+    assert.equal(afterRefresh.body.data.session.actingAs, false);
+  });
+
+  test("only the Platform Admin can enter an organization", async () => {
+    const res = await post("/auth/enter-org", A.admin.token, { organizationId: B.orgId }, { headers: { cookie: A.admin.cookie } });
+    assert.equal(res.status, 403);
+    assert.equal((await get("/auth/organizations", A.admin.token)).status, 403);
+    assert.equal((await post("/auth/exit-org", A.hr.token, {})).status, 403);
+  });
+
   test("an organization's last active Org Admin cannot be suspended", async () => {
     const detail = (await get(`/platform/organizations/${B.orgId}`, P.token)).body.data;
     assert.equal(detail.admins.length, 1);

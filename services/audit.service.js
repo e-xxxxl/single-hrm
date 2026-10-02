@@ -1,6 +1,7 @@
 import { AuditLog } from "../models/hrm/AuditLog.js";
 import { logger } from "../utils/logger.js";
 import { parsePagination, paginated, escapeRegex } from "../utils/query.js";
+import { PLATFORM_ROLE } from "../utils/permissions.js";
 
 /**
  * Write an audit entry. Never throws into the caller — a failed audit write is
@@ -15,7 +16,9 @@ export async function recordAudit(req, entry) {
       organizationId: entry.organizationId || req?.orgId || req?.auth?.organizationId,
       actor: req?.auth?.userId,
       actorName: req?.auth?.name,
-      actorRole: req?.auth?.role,
+      // While a Platform Admin is "entered" in an organization their role is
+      // Org Admin for access purposes, but the trail must say who really acted.
+      actorRole: req?.auth?.actingAs ? PLATFORM_ROLE : req?.auth?.role,
       ip: req?.ip,
       userAgent: req?.get?.("user-agent"),
       ...entry,
