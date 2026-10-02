@@ -15,6 +15,7 @@ import cloudinary, { cloudinaryEnabled } from "../config/cloudinary.js";
 import { AppError } from "../utils/AppError.js";
 import { hasPermission, HR_ADMIN_ROLES } from "../utils/permissions.js";
 import { logger } from "../utils/logger.js";
+import { env } from "../config/env.js";
 
 /**
  * File storage.
@@ -34,13 +35,17 @@ export const UPLOAD_PURPOSES = ["document", "leave-document", "resume", "evidenc
 
 export const fileRef = (id) => `/hrm/files/${id}`;
 
-function uploadBufferToCloudinary(buffer, { folder, originalName }) {
+/** Cloudinary folder for an organization's uploads: <CLOUDINARY_FOLDER>/<organizationId>/<purpose> */
+export const cloudinaryFolderFor = (orgId, purpose) => `${env.cloudinaryFolder}/${orgId}/${purpose}`;
+
+export function uploadBufferToCloudinary(buffer, { folder, originalName }) {
   return new Promise((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       {
         folder,
         resource_type: "auto",
         type: "authenticated",
+        timeout: 120_000,
         filename_override: originalName,
         use_filename: true,
         unique_filename: true,
@@ -49,6 +54,18 @@ function uploadBufferToCloudinary(buffer, { folder, originalName }) {
     );
     Readable.from(buffer).pipe(stream);
   });
+}
+
+/** Stream an authenticated Cloudinary asset through a 60-second signed download URL. */
+export async function cloudinaryStream(record) {
+  const url = cloudinary.utils.private_download_url(record.publicId, record.format || "", {
+    resource_type: record.resourceType || "raw",
+    type: record.deliveryType || "authenticated",
+    expires_at: Math.floor(Date.now() / 1000) + 60,
+  });
+  const res = await fetch(url);
+  if (!res.ok || !res.body) throw AppError.notFound("File is missing from storage");
+  return Readable.fromWeb(res.body);
 }
 
 async function writeLocal(orgId, file) {
@@ -77,7 +94,7 @@ export async function saveUpload(orgId, file, { purpose = "general", userId } = 
 
   if (cloudinaryEnabled) {
     const result = await uploadBufferToCloudinary(file.buffer, {
-      folder: `hrm/${orgId}/${purpose}`,
+      folder: cloudinaryFolderFor(orgId, purpose),
       originalName: file.originalname,
     });
     Object.assign(record, {
@@ -98,16 +115,7 @@ export async function openForDownload(orgId, id) {
   const record = await StoredFile.findOne({ _id: id, organizationId: orgId });
   if (!record) throw AppError.notFound("File not found");
 
-  if (record.publicId) {
-    const url = cloudinary.utils.private_download_url(record.publicId, record.format || "", {
-      resource_type: record.resourceType || "raw",
-      type: record.deliveryType || "authenticated",
-      expires_at: Math.floor(Date.now() / 1000) + 60,
-    });
-    const res = await fetch(url);
-    if (!res.ok || !res.body) throw AppError.notFound("File is missing from storage");
-    return { record, stream: Readable.fromWeb(res.body) };
-  }
+  if (record.publicId) return { record, stream: await cloudinaryStream(record) };
 
   const filePath = path.resolve(UPLOAD_DIR, record.key || "");
   if (!filePath.startsWith(path.resolve(UPLOAD_DIR)) || !fs.existsSync(filePath)) {

@@ -92,6 +92,9 @@ export const env = {
   cloudName: optional("CLOUD_NAME", ""),
   cloudApiKey: optional("CLOUD_API_KEY", ""),
   cloudApiSecret: optional("CLOUD_API_SECRET", ""),
+  // Root folder inside the Cloudinary account; files land in
+  // <folder>/<organizationId>/<purpose>/. Slashes at the ends are ignored.
+  cloudinaryFolder: optional("CLOUDINARY_FOLDER", "hrm").replace(/^\/+|\/+$/g, "") || "hrm",
 
   // Reverse geocoding for GPS attendance. When unset the API stores raw
   // coordinates and leaves the address blank rather than failing.
