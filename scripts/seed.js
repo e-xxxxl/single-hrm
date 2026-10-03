@@ -64,10 +64,11 @@ export const DEFAULT_DEV_PASSWORD = "Demo@12345";
 
 /** The platform's organizations. Profile details beyond the name are left for each Org Admin to fill in. */
 export const ORGANIZATIONS = [
-  { name: "EsiatOptivest", code: "ESIAT", slug: "esiatoptivest", brandColor: "blue" },
-  { name: "PwweFoundation", code: "PWWE", slug: "pwwefoundation", brandColor: "green" },
+  // brandColor presets come from each organization's logo (client/public/logos).
+  { name: "EsiatOptivest", code: "ESIAT", slug: "esiatoptivest", brandColor: "navy" },
+  { name: "PwweFoundation", code: "PWWE", slug: "pwwefoundation", brandColor: "plum" },
   { name: "VendraMart", code: "VMART", slug: "vendramart", brandColor: "orange" },
-  { name: "SJI", code: "SJI", slug: "sji", brandColor: "purple" },
+  { name: "SJI", code: "SJI", slug: "sji", brandColor: "forest" },
 ];
 
 /**

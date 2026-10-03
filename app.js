@@ -5,7 +5,7 @@ import morgan from "morgan";
 
 import { env } from "./config/env.js";
 import { connectDatabase, closeDatabase, hrmConnection } from "./config/db.js";
-import { migrateIndexes } from "./config/indexes.js";
+import { migrateIndexes, migrateBranding } from "./config/indexes.js";
 import { logger } from "./utils/logger.js";
 import api from "./routes/index.js";
 import { notFound, errorHandler } from "./middleware/errorHandler.js";
@@ -57,6 +57,7 @@ app.use(errorHandler);
 export async function start({ port = env.port } = {}) {
   await connectDatabase();
   await migrateIndexes(hrmConnection); // models are registered by the route imports above
+  await migrateBranding(hrmConnection);
 
   if (!env.isTest) startHrScheduler();
   const server = app.listen(port, () => {

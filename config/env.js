@@ -44,6 +44,44 @@ function int(name, fallback) {
 const missing = [];
 const invalid = [];
 
+// Shared hosting domains: browsers refuse cookies scoped to these, so a
+// COOKIE_DOMAIN set to one would silently break sign-in.
+const PUBLIC_SUFFIXES = ["onrender.com", "vercel.app", "netlify.app", "herokuapp.com", "github.io", "pages.dev", "web.app", "fly.dev", "railway.app"];
+
+/**
+ * Accept what people actually paste ("https://.example.com:3000/", quoted,
+ * padded) and reduce it to the bare domain a cookie's Domain attribute needs.
+ * Anything that still can't work is reported with a plain explanation instead
+ * of surfacing later as "option domain is invalid" on the first login.
+ */
+function normaliseCookieDomain(raw) {
+  if (!raw) return "";
+  const cleaned = raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .replace(/^[a-z]+:\/\//i, "")
+    .replace(/[/?#].*$/, "")
+    .replace(/:\d+$/, "")
+    .trim()
+    .toLowerCase();
+  const bare = cleaned.replace(/^\./, "");
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(bare)) {
+    invalid.push(
+      `COOKIE_DOMAIN "${raw}" is not a usable cookie domain. Use a bare domain such as .example.com — ` +
+        "no protocol, port or path — or leave it empty. (It cannot be 'localhost' or an IP address.)",
+    );
+    return "";
+  }
+  if (PUBLIC_SUFFIXES.some((s) => bare === s)) {
+    invalid.push(
+      `COOKIE_DOMAIN "${raw}" is a shared hosting domain; browsers reject cookies scoped to it. ` +
+        "Leave COOKIE_DOMAIN empty (with COOKIE_SECURE=true and COOKIE_SAMESITE=none), or use your own domain.",
+    );
+    return "";
+  }
+  return cleaned;
+}
+
 export const env = {
   nodeEnv: NODE_ENV,
   isProd,
@@ -81,7 +119,7 @@ export const env = {
   // (https, cross site on a different domain).
   cookieSecure: optional("COOKIE_SECURE", isProd ? "true" : "false") === "true",
   cookieSameSite: optional("COOKIE_SAMESITE", isProd ? "none" : "lax"),
-  cookieDomain: optional("COOKIE_DOMAIN", ""),
+  cookieDomain: normaliseCookieDomain(optional("COOKIE_DOMAIN", "")),
 
   // File uploads. "local" keeps bytes on disk under UPLOAD_DIR and streams them
   // through the auth-gated download route; "cloudinary" stores them as

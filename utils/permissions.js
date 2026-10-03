@@ -121,7 +121,9 @@ export const ROLE_PERMISSIONS = {
 
   "HR Manager": [
     "org:read",
-    "user:read",
+    // HR can create logins and change roles — but only for roles below HR Manager
+    // (see assignableRoles / user.service.js); Org Admin and peers stay protected.
+    ...P.user,
     ...P.settings,
     ...P.audit,
     ...P.employee,

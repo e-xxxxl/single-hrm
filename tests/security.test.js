@@ -366,6 +366,50 @@ describe("roles and permissions inside an organization", () => {
     assert.equal((await patch(`/users/${self.id}`, A.admin.token, { status: "suspended" })).status, 403);
   });
 
+  test("HR Manager can change roles of people below them — not an Org Admin, a peer, or themselves", async () => {
+    const byEmail = (e) => A.users.find((u) => u.email === e);
+    const finance = byEmail("finance@esiatoptivest.test");
+    const up = await patch(`/users/${finance.id}`, A.hr.token, { role: "HR Staff" });
+    assert.equal(up.status, 200, JSON.stringify(up.body));
+    assert.equal(up.body.data.user.role, "HR Staff");
+    assert.equal((await patch(`/users/${finance.id}`, A.hr.token, { role: "Finance" })).status, 200);
+
+    // Same thing from the employee profile ("Change role / login").
+    const emp = A.employeeRecord;
+    const viaEmployee = await patch(`/hrm/employees/${emp.id}/login`, A.hr.token, { role: "Branch Manager" });
+    assert.equal(viaEmployee.status, 200, JSON.stringify(viaEmployee.body));
+    assert.equal(viaEmployee.body.data.role, "Branch Manager");
+    assert.equal((await patch(`/hrm/employees/${emp.id}/login`, A.hr.token, { role: "Employee" })).status, 200);
+    // The employee profile shows the access role.
+    assert.equal((await get(`/hrm/employees/${emp.id}`, A.hr.token)).body.data.user.role, "Employee");
+
+    // Not above or beside themselves.
+    assert.equal((await patch(`/users/${byEmail("admin@esiatoptivest.test").id}`, A.hr.token, { role: "Employee" })).status, 403);
+    assert.equal((await patch(`/users/${finance.id}`, A.hr.token, { role: "HR Manager" })).status, 403);
+    assert.equal((await patch(`/users/${byEmail("hr@esiatoptivest.test").id}`, A.hr.token, { role: "Employee" })).status, 403);
+    // HR Staff (no user:write) cannot.
+    assert.equal((await patch(`/users/${finance.id}`, A.hrstaff.token, { role: "Employee" })).status, 403);
+  });
+
+  test("employee validation errors name the field; blank optional bank fields are accepted", async () => {
+    const base = {
+      firstName: "Vera",
+      lastName: "Nwosu",
+      email: "vera.nwosu@esiatoptivest.test",
+      phone: "+2348031230000",
+      position: "Analyst",
+      dateJoined: "2026-01-05",
+    };
+    const short = await post("/hrm/employees", A.hr.token, { ...base, email: "short.phone@esiatoptivest.test", phone: "0803" });
+    assert.equal(short.status, 422);
+    assert.ok(short.body.error.details.some((d) => d.path === "phone" && /too short/.test(d.message)));
+    const bad = await post("/hrm/employees", A.hr.token, { ...base, email: "bad.acct@esiatoptivest.test", bank: { bankName: "GTBank", accountNumber: "12345" } });
+    assert.equal(bad.status, 422);
+    assert.ok(bad.body.error.details.some((d) => d.path === "bank.accountNumber" && /10 digits/.test(d.message)));
+    const ok = await post("/hrm/employees", A.hr.token, { ...base, bank: { bankName: "GTBank", accountNumber: "", accountName: "" } });
+    assert.equal(ok.status, 201, JSON.stringify(ok.body));
+  });
+
   test("destructive operations are Org-Admin-only", async () => {
     const victim = A.employees.find((e) => !e.user);
     assert.equal((await del(`/hrm/employees/${victim.id}`, A.hr.token)).status, 403);
@@ -503,7 +547,8 @@ describe("platform administration", () => {
     assert.equal(toA.body.data.session.organizationId, A.orgId);
     const tokA = toA.body.data.accessToken;
     const aList = await get("/hrm/employees?limit=100", tokA);
-    assert.deepEqual(new Set(ids(aList.body.data)), new Set(ids(A.employees)));
+    const aNow = (await get("/hrm/employees?limit=100", A.admin.token)).body.data; // fresh: earlier tests add employees
+    assert.deepEqual(new Set(ids(aList.body.data)), new Set(ids(aNow)));
     // Entered into A, B's records are still invisible.
     assert.equal((await get(`/hrm/employees/${B.employees[0].id}`, tokA)).status, 404);
     // Platform routes are closed while inside an organization.
@@ -518,7 +563,8 @@ describe("platform administration", () => {
     assert.equal(toB.status, 200);
     const tokB = toB.body.data.accessToken;
     const bList = await get("/hrm/employees?limit=100", tokB);
-    assert.deepEqual(new Set(ids(bList.body.data)), new Set(ids(B.employees)));
+    const bNow = (await get("/hrm/employees?limit=100", B.admin.token)).body.data;
+    assert.deepEqual(new Set(ids(bList.body.data)), new Set(ids(bNow)));
     assert.equal((await get(`/hrm/employees/${A.employees[0].id}`, tokB)).status, 404);
 
     // The entered organization survives a token refresh (page reload).

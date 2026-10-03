@@ -31,4 +31,29 @@ export async function migrateIndexes(connection) {
   }
 }
 
+/**
+ * One-off: the four organizations were first seeded with placeholder theme
+ * colours; they now use colours taken from their logos. Only an organization
+ * still on its original placeholder is changed — a colour someone picked in
+ * Settings is never overwritten.
+ */
+const BRANDING = [
+  { code: "ESIAT", from: "blue", to: "navy" },
+  { code: "PWWE", from: "green", to: "plum" },
+  { code: "SJI", from: "purple", to: "forest" },
+];
+
+export async function migrateBranding(connection) {
+  const Organization = connection.models.Organization;
+  if (!Organization) return;
+  for (const { code, from, to } of BRANDING) {
+    try {
+      const res = await Organization.updateOne({ code, brandColor: from }, { $set: { brandColor: to } });
+      if (res.modifiedCount) logger.info(`[db] ${code} theme colour ${from} → ${to}`);
+    } catch (err) {
+      logger.warn(`[db] branding migration for ${code} failed: ${err.message}`);
+    }
+  }
+}
+
 export default migrateIndexes;

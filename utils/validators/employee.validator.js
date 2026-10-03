@@ -23,7 +23,7 @@ const emergencyContact = z
 const bank = z
   .object({
     bankName: z.string().max(120).optional(),
-    accountNumber: z.string().regex(/^\d{10}$/,"NUBAN account numbers are 10 digits").optional(),
+    accountNumber: z.string().regex(/^\d{10}$/, "must be exactly 10 digits").or(z.literal("")).optional(),
     accountName: z.string().max(160).optional(),
   })
   .partial();
@@ -42,7 +42,7 @@ export const createEmployeeSchema = z.object({
   middleName: z.string().max(80).optional(),
   lastName: z.string().min(1).max(80),
   email: z.string().email(),
-  phone: z.string().min(7).max(30),
+  phone: z.string().min(7, "is too short (at least 7 characters)").max(30),
   altPhone: z.string().max(30).optional(),
   dateOfBirth: optionalDate,
   gender: z.enum(GENDERS).optional(),
@@ -78,7 +78,7 @@ export const createEmployeeSchema = z.object({
   provisionLogin: z
     .object({
       role: z.enum(ORG_ROLES),
-      password: z.string().min(8).max(128).optional(),
+      password: z.string().min(8, "must be at least 8 characters").max(128).optional(),
     })
     .optional(),
 });

@@ -14,7 +14,7 @@ const { Schema } = mongoose;
 export const PAYROLL_STRATEGIES = ["fixed-monthly", "hybrid", "allowance-based"];
 export const ORG_STATUSES = ["active", "inactive"];
 // Accent presets the client knows how to render (client/src/utils/brandTheme.js).
-export const BRAND_COLORS = ["blue", "green", "amber", "orange", "purple", "teal", "rose"];
+export const BRAND_COLORS = ["blue", "navy", "green", "forest", "amber", "orange", "plum", "purple", "teal", "rose"];
 
 const settingsSchema = new Schema(
   {

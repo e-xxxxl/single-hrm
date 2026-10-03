@@ -69,7 +69,7 @@ export async function getEmployee(orgId, id, { includeSensitive = false } = {}) 
     .populate("department", "name")
     .populate("branch", "name state geofenceRadiusMeters")
     .populate("reportingManager", "firstName lastName employeeId position")
-    .populate("user", "email status lastLoginAt");
+    .populate("user", "email status lastLoginAt role");
   if (includeSensitive) q = q.select(SENSITIVE_SELECT);
   const employee = await q;
   if (!employee) throw AppError.notFound("Employee not found");
